@@ -1896,6 +1896,10 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
                   return false;
               }
 
+            if (ttype < 0 || ttype >= GGML_TYPE_COUNT) {
+                WHISPER_LOG_ERROR("%s: invalid ttype %d in model file (expected 0 <= ttype < %d)\n", __func__, ttype, GGML_TYPE_COUNT);
+                return false;
+            }
 
             int32_t nelements = 1;
             int32_t ne[4] = { 1, 1, 1, 1 };
@@ -4149,12 +4153,14 @@ const char * whisper_lang_str_full(int id) {
     return nullptr;
 }
 
-int whisper_lang_auto_detect_with_state(
+static int whisper_lang_auto_detect_internal(
         struct whisper_context * ctx,
           struct whisper_state * state,
                            int   offset_ms,
                            int   n_threads,
-                         float * lang_probs) {
+                         float * lang_probs,
+           ggml_abort_callback   abort_callback,
+                          void * abort_callback_data) {
     const int seek = offset_ms/10;
 
     if (seek < 0) {
@@ -4168,14 +4174,18 @@ int whisper_lang_auto_detect_with_state(
     }
 
     // run the encoder
-    if (whisper_encode_with_state(ctx, state, seek, n_threads) != 0) {
+    if (!whisper_encode_internal(*ctx, *state, seek, n_threads, abort_callback, abort_callback_data)) {
         WHISPER_LOG_ERROR("%s: failed to encode\n", __func__);
         return -6;
     }
 
     const std::vector<whisper_token> prompt = { whisper_token_sot(ctx) };
 
-    if (whisper_decode_with_state(ctx, state, prompt.data(), prompt.size(), 0, n_threads) != 0) {
+    whisper_batch_prep_legacy(state->batch, prompt.data(), prompt.size(), 0, 0);
+
+    whisper_kv_cache_seq_rm(state->kv_self, 0, 0, -1);
+
+    if (!whisper_decode_internal(*ctx, *state, state->batch, n_threads, false, abort_callback, abort_callback_data)) {
         WHISPER_LOG_ERROR("%s: failed to decode\n", __func__);
         return -7;
     }
@@ -4222,6 +4232,15 @@ int whisper_lang_auto_detect_with_state(
     }
 
     return logits_id[0].second;
+}
+
+int whisper_lang_auto_detect_with_state(
+        struct whisper_context * ctx,
+          struct whisper_state * state,
+                           int   offset_ms,
+                           int   n_threads,
+                         float * lang_probs) {
+    return whisper_lang_auto_detect_internal(ctx, state, offset_ms, n_threads, lang_probs, nullptr, nullptr);
 }
 
 int whisper_lang_auto_detect(
@@ -4947,6 +4966,11 @@ struct whisper_vad_context * whisper_vad_init_with_params(
     {
         read_safe(loader, hparams.n_encoder_layers);
 
+        if (hparams.n_encoder_layers != 4) {
+            WHISPER_LOG_ERROR("%s: invalid n_encoder_layers %d in VAD model file (expected 4)\n", __func__, hparams.n_encoder_layers);
+            return nullptr;
+        }
+
         hparams.encoder_in_channels = new int32_t[hparams.n_encoder_layers];
         hparams.encoder_out_channels = new int32_t[hparams.n_encoder_layers];
         hparams.kernel_sizes = new int32_t[hparams.n_encoder_layers];
@@ -5152,6 +5176,10 @@ struct whisper_vad_context * whisper_vad_init_with_params(
                   return nullptr;
             }
 
+            if (ttype < 0 || ttype >= GGML_TYPE_COUNT) {
+                WHISPER_LOG_ERROR("%s: invalid ttype %d in model file (expected 0 <= ttype < %d)\n", __func__, ttype, GGML_TYPE_COUNT);
+                return nullptr;
+            }
 
             int32_t nelements = 1;
             int32_t ne[4] = { 1, 1, 1, 1 };
@@ -6972,7 +7000,7 @@ int whisper_full_with_state(
             }
         }
 
-        const auto lang_id = whisper_lang_auto_detect_with_state(ctx, state, 0, params.n_threads, probs.data());
+        const auto lang_id = whisper_lang_auto_detect_internal(ctx, state, 0, params.n_threads, probs.data(), params.abort_callback, params.abort_callback_user_data);
         if (lang_id < 0) {
             WHISPER_LOG_ERROR("%s: failed to auto-detect language\n", __func__);
             return -3;
