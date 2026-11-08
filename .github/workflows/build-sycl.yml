@@ -21,10 +21,22 @@ on:
 
   pull_request:
     types: [opened, synchronize, reopened]
-    paths-ignore:
-      - 'bindings/ruby/**'        # handled by bindings-ruby.yml
-      - 'bindings/go/**'          # handled by bindings-go.yml
-      - 'examples/addon.node/**'  # handled by examples.yml
+    paths: ['.github/workflows/build-sycl.yml',
+            '**/CMakeLists.txt',
+            '**/Makefile',
+            '**/*.mk',
+            '**/*.cmake',
+            '**/*.in',
+            '**/*.h',
+            '**/*.hpp',
+            '**/*.c',
+            '**/*.cpp',
+            '**/*.cu',
+            '**/*.cuh',
+            '**/*.cl',
+            '!bindings/ruby/**',
+            '!bindings/go/**',
+            '!examples/addon.node/**']
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref && github.ref || github.run_id }}
@@ -66,7 +78,7 @@ jobs:
       - name: install oneAPI MKL library
         shell: bash
         run: |
-          sudo apt install intel-oneapi-mkl-devel
+          sudo apt install intel-oneapi-mkl-devel intel-oneapi-dnnl intel-oneapi-dnnl-devel
 
       - name: ccache
         uses: ggml-org/ccache-action@v1.2.21
@@ -125,7 +137,7 @@ jobs:
       - name: install oneAPI MKL library
         shell: bash
         run: |
-          sudo apt install intel-oneapi-mkl-devel
+          sudo apt install intel-oneapi-mkl-devel intel-oneapi-dnnl intel-oneapi-dnnl-devel
 
       - name: ccache
         uses: ggml-org/ccache-action@v1.2.21
